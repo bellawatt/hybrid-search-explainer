@@ -1,0 +1,739 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Dense, Sparse, Hybrid</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: three wide "stages" stacked down the page. Each stage is a figure the presenter steps through
+   with Prev/Next; plain captions sit under the figure, engineering notes fold away beneath. */
+:root {
+  --bg: #F2F5F8;
+  --surface: #FFFFFF;
+  --surface-2: #E8EDF2;
+  --fg: #17212B;
+  --muted: #5E6C7A;
+  --line: #CFD8E1;
+  --grid: #E3E9EF;
+  --dense: #0E8F91;      /* teal: continuous, learned dimensions */
+  --dense-soft: #D7F0F0;
+  --sparse: #C9780F;     /* amber: discrete vocabulary slots */
+  --sparse-soft: #FBEBD3;
+  --accent: #6D4FD9;     /* violet: the thing under discussion (a direction, a query) */
+  --accent-soft: #E9E3FA;
+  --display: "Bricolage Grotesque", "Avenir Next", "Helvetica Neue", Arial, sans-serif;
+  --body: "Instrument Sans", "Helvetica Neue", Arial, sans-serif;
+  --mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0F151C; --surface: #161E27; --surface-2: #1F2932; --fg: #E6ECF2; --muted: #96A4B2;
+    --line: #2C3843; --grid: #1E2932;
+    --dense: #35C6C8; --dense-soft: #11393B;
+    --sparse: #F0A53A; --sparse-soft: #3F2B10;
+    --accent: #A08CF0; --accent-soft: #2C2450;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0F151C; --surface: #161E27; --surface-2: #1F2932; --fg: #E6ECF2; --muted: #96A4B2;
+  --line: #2C3843; --grid: #1E2932;
+  --dense: #35C6C8; --dense-soft: #11393B;
+  --sparse: #F0A53A; --sparse-soft: #3F2B10;
+  --accent: #A08CF0; --accent-soft: #2C2450;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg);
+  font-family: var(--body); font-size: 16px; line-height: 1.5;
+  padding-block: 0 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 1040px; margin: 0 auto; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; line-height: 1.1; }
+p { margin: 0; }
+a { color: inherit; }
+code, .mono { font-family: var(--mono); font-size: 0.92em; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* header */
+header.top { padding-block: 40px 28px; display: grid; gap: 14px; }
+header.top h1 { font-size: clamp(2rem, 5vw, 3.4rem); font-weight: 700; letter-spacing: -0.02em; }
+header.top h1 .d { color: var(--dense); } header.top h1 .s { color: var(--sparse); }
+header.top .lede { max-width: 62ch; color: var(--muted); font-size: 1.05rem; }
+nav.scenes { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+nav.scenes a {
+  text-decoration: none; font-size: 0.85rem; font-weight: 500; padding: 6px 12px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--fg);
+}
+nav.scenes a:hover { border-color: var(--fg); }
+.kbd-hint { font-size: 0.8rem; color: var(--muted); }
+.kbd-hint kbd { font-family: var(--mono); font-size: 0.75rem; border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; background: var(--surface); }
+
+/* scene */
+.scene { padding-block: 36px; border-top: 1px solid var(--line); display: grid; gap: 18px; scroll-margin-top: 16px; }
+.scene .eyebrow { font-family: var(--mono); font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.scene h2 { font-size: clamp(1.5rem, 3vw, 2.1rem); font-weight: 700; letter-spacing: -0.01em; }
+.scene .intro { color: var(--muted); max-width: 66ch; }
+.stage {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+  min-width: 0;
+}
+.stage svg { display: block; width: 100%; height: auto; max-width: 100%; }
+.stage .figwrap { overflow-x: auto; }
+figure { margin: 0; }
+figcaption.srcap { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+/* stepper */
+.stepper {
+  display: grid; grid-template-columns: auto 1fr auto; gap: 14px; align-items: start;
+  padding: 14px 16px; border-top: 1px solid var(--line); background: var(--surface);
+}
+.stepper button {
+  font: inherit; font-weight: 600; font-size: 0.9rem; padding: 8px 14px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--surface-2); color: var(--fg);
+}
+.stepper button:hover:not(:disabled) { border-color: var(--fg); }
+.stepper button:disabled { opacity: 0.4; cursor: default; }
+.stepper .cap { min-width: 0; display: grid; gap: 4px; }
+.stepper .dots { display: flex; gap: 6px; align-items: center; }
+.stepper .dots i { width: 22px; height: 4px; border-radius: 2px; background: var(--line); transition: background .3s; }
+.stepper .dots i.on { background: var(--accent); }
+.stepper .cap-title { font-family: var(--display); font-weight: 700; font-size: 1.05rem; }
+.stepper .cap-text { color: var(--muted); font-size: 0.95rem; max-width: 70ch; }
+@media (max-width: 560px) {
+  .stepper { grid-template-columns: 1fr 1fr; }
+  .stepper .cap { grid-column: 1 / -1; order: -1; }
+}
+
+/* engineer notes */
+details.notes { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+details.notes summary { cursor: pointer; padding: 12px 16px; font-weight: 600; font-size: 0.95rem; list-style: none; display: flex; gap: 10px; align-items: center; }
+details.notes summary::-webkit-details-marker { display: none; }
+details.notes summary::before { content: "+"; font-family: var(--mono); color: var(--muted); width: 1em; }
+details.notes[open] summary::before { content: "−"; }
+details.notes .body { padding: 0 16px 16px; display: grid; gap: 10px; color: var(--fg); font-size: 0.95rem; max-width: 76ch; }
+details.notes .body p { max-width: 70ch; }
+details.notes .body ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+details.notes .body code { background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
+details.notes .formula { font-family: var(--mono); font-size: 0.9rem; background: var(--surface-2); padding: 8px 12px; border-radius: 6px; overflow-x: auto; }
+
+/* ====== Scene 1: embedding space ====== */
+#s1 text { font-family: var(--body); font-size: 13px; fill: var(--fg); }
+#s1 .axis-label { font-size: 11.5px; fill: var(--muted); letter-spacing: 0.04em; }
+#s1 .grid line { stroke: var(--grid); }
+#s1 .axes line { stroke: var(--line); stroke-width: 1.2; }
+#s1 .pt circle { fill: var(--fg); }
+#s1 .pt text { font-weight: 500; }
+#s1 .m-fg { fill: var(--fg); } #s1 .m-accent { fill: var(--accent); }
+#s1 .draw { stroke-dasharray: 1; stroke-dashoffset: 1; transition: stroke-dashoffset .7s ease, opacity .35s; }
+#s1 .st2, #s1 .st3, #s1 .st4 { opacity: 0; transition: opacity .35s; }
+#s1 .st2 line, #s1 .st3 line { stroke-width: 2; fill: none; }
+#s1 .off { stroke: var(--accent); }
+#s1 .off-faint { stroke: var(--accent); opacity: .55; }
+#s1 .lab-accent { fill: var(--accent); font-weight: 600; }
+#s1 .lab-mono { font-family: var(--mono); font-size: 12px; }
+#s1.step-2 .st2 { opacity: 1; }
+#s1.step-2 .st2 .draw { stroke-dashoffset: 0; }
+#s1.step-3 .st2 { opacity: .3; } #s1.step-3 .st2 .draw { stroke-dashoffset: 0; }
+#s1.step-3 .st3 { opacity: 1; }
+#s1.step-3 .st3 #v-king { stroke-dashoffset: 0; }
+#s1.step-3 .st3 #v-female { stroke-dashoffset: 0; transition-delay: .7s; }
+#s1 #queen-ring { fill: none; stroke: var(--accent); stroke-width: 2.5; r: 7; opacity: 0; transition: opacity .3s, r .5s; }
+#s1.step-3 #queen-ring { opacity: 1; r: 14; transition-delay: 1.4s; }
+#s1.step-3 #eq-label { opacity: 1; transition-delay: 1.5s; }
+#s1 #eq-label { opacity: 0; transition: opacity .3s; }
+#s1.step-4 .st4 { opacity: 1; }
+#s1.step-4 .st4 .draw { stroke-dashoffset: 0; }
+#s1 .st4 .q circle { fill: var(--accent); }
+#s1 .st4 .q text { fill: var(--accent); font-weight: 600; }
+#s1 .st4 .nn { stroke: var(--accent); stroke-dasharray: 4 4; stroke-width: 1.5; }
+#s1 .st4 .rank rect { fill: var(--surface-2); stroke: var(--line); }
+#s1 .st4 .rank text { font-size: 12px; }
+#s1 .st4 .rank .hd { font-weight: 600; }
+#s1 .st4 .rank .num { font-family: var(--mono); fill: var(--muted); }
+#s1.step-4 .pt.dim { opacity: .35; } #s1 .pt { transition: opacity .35s; }
+
+/* ====== Scene 2: dense vs sparse ====== */
+#s2 text { font-family: var(--body); font-size: 13px; fill: var(--fg); }
+#s2 .tok rect { fill: var(--surface-2); stroke: var(--line); transition: fill .4s, stroke .4s; }
+#s2 .tok text { font-family: var(--mono); font-size: 12.5px; }
+#s2 .tok.stop text { fill: var(--muted); }
+#s2.step-2 .tok.hit rect, #s2.step-4 .tok.hit rect { fill: var(--sparse-soft); stroke: var(--sparse); }
+#s2.step-2 .tok.stop text { text-decoration: line-through; }
+#s2.step-3 .tok rect { fill: var(--dense-soft); stroke: var(--dense); }
+#s2 .lbl { font-weight: 600; font-size: 13.5px; }
+#s2 .sub { fill: var(--muted); font-size: 12px; }
+#s2 .lbl.d, #s2 .d-val { fill: var(--dense); } #s2 .lbl.s { fill: var(--sparse); }
+#s2 .d-val { font-family: var(--mono); font-size: 10.5px; }
+#s2 .dcell { fill: var(--dense); stroke: var(--surface); stroke-width: 1; opacity: 0; transition: opacity .5s; }
+#s2 .dcell.ghost { fill: none; stroke: var(--line); opacity: 1; }
+#s2 .dblock, #s2 .sblock { opacity: .35; transition: opacity .4s; }
+#s2.step-2 .sblock, #s2.step-3 .sblock, #s2.step-4 .sblock, #s2.step-3 .dblock, #s2.step-4 .dblock { opacity: 1; }
+#s2.step-3 .dcell, #s2.step-4 .dcell { opacity: var(--a); }
+#s2 .dvals { opacity: 0; transition: opacity .4s .9s; }
+#s2.step-3 .dvals, #s2.step-4 .dvals { opacity: 1; }
+#s2 .sslot { fill: none; stroke: var(--line); stroke-width: .6; }
+#s2 .sbar { fill: var(--sparse); transform-box: fill-box; transform-origin: bottom; transform: scaleY(0); transition: transform .6s cubic-bezier(.2,.8,.2,1); }
+#s2.step-2 .sbar, #s2.step-3 .sbar, #s2.step-4 .sbar { transform: scaleY(1); }
+#s2 .slab { opacity: 0; transition: opacity .4s .5s; }
+#s2.step-2 .slab, #s2.step-3 .slab, #s2.step-4 .slab { opacity: 1; }
+#s2 .slab text { font-family: var(--mono); font-size: 11px; fill: var(--sparse); }
+#s2 .slab .w { fill: var(--muted); font-size: 10px; }
+#s2 .slab line { stroke: var(--sparse); stroke-dasharray: 2 3; }
+#s2 .arrow-lbl { fill: var(--muted); font-size: 12px; font-style: italic; }
+#s2 .m-muted { fill: var(--muted); }
+#s2 .flow { stroke: var(--muted); stroke-width: 1.2; fill: none; opacity: 0; transition: opacity .4s; }
+#s2.step-2 .flow.s, #s2.step-3 .flow.d { opacity: 1; }
+#s2 .flow-lbl { opacity: 0; transition: opacity .4s; }
+#s2.step-2 .flow-lbl.s, #s2.step-3 .flow-lbl.d { opacity: 1; }
+
+.qcards { display: none; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; padding: 16px; border-top: 1px solid var(--line); background: var(--bg); }
+.qcards.show { display: grid; }
+.qcard { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; display: grid; gap: 8px; min-width: 0; }
+.qcard .q { font-family: var(--mono); font-size: 0.9rem; }
+.qcard .q::before { content: "query  "; color: var(--muted); font-size: 0.75rem; letter-spacing: .06em; text-transform: uppercase; }
+.qcard .row { display: grid; grid-template-columns: 70px 1fr; gap: 8px; font-size: 0.88rem; align-items: baseline; }
+.qcard .row b { font-weight: 600; }
+.qcard .row.d b { color: var(--dense); } .qcard .row.s b { color: var(--sparse); }
+.qcard .row .why { color: var(--muted); }
+.qcard .mark { font-family: var(--mono); font-weight: 600; }
+.qcard .mark.hit { color: var(--dense); } .qcard .row.s .mark.hit { color: var(--sparse); }
+.qcard .mark.miss { color: var(--muted); }
+
+/* ====== Scene 3: hybrid ====== */
+.hy { padding: 18px 16px 16px; display: grid; gap: 16px; }
+.hy-query { display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: center; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
+.hy-query .qt { font-family: var(--mono); font-size: 0.95rem; }
+.hy-query .qt::before { content: "query  "; color: var(--muted); font-family: var(--body); font-size: 0.75rem; letter-spacing: .06em; text-transform: uppercase; }
+.hy-query .enc { display: flex; gap: 14px; align-items: center; }
+.hy-query .enc svg { display: block; }
+.hy-query .enc .tag { font-size: 0.75rem; color: var(--muted); display: grid; gap: 3px; justify-items: center; }
+.hy-cols { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+@media (max-width: 760px) { .hy-cols { grid-template-columns: 1fr; } .hy-query { grid-template-columns: 1fr; } }
+.hy-col { min-width: 0; display: grid; gap: 8px; align-content: start; opacity: .35; transition: opacity .4s; }
+.hy-col.on { opacity: 1; }
+.hy-col h3 { font-size: 1rem; font-weight: 700; display: flex; align-items: baseline; gap: 8px; }
+.hy-col h3 small { font-family: var(--mono); font-weight: 400; font-size: 0.72rem; color: var(--muted); }
+.hy-col[data-col="dense"] h3 { color: var(--dense); } .hy-col[data-col="sparse"] h3 { color: var(--sparse); }
+.hy-col[data-col="fused"] h3 { color: var(--accent); }
+.hy-list { position: relative; height: calc(7 * 46px); }
+.hy-row {
+  position: absolute; left: 0; right: 0; top: 0; height: 40px; display: grid; grid-template-columns: 22px 1fr auto; gap: 8px; align-items: center;
+  padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); font-size: 0.85rem;
+  transform: translateY(var(--y)); transition: transform .55s cubic-bezier(.2,.8,.2,1), opacity .4s, border-color .3s, box-shadow .3s; opacity: 0;
+}
+.hy-col.on .hy-row { opacity: 1; }
+.hy-row .rk { font-family: var(--mono); font-size: 0.78rem; color: var(--muted); }
+.hy-row .tt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hy-row .sc { font-family: var(--mono); font-size: 0.78rem; font-variant-numeric: tabular-nums; display: flex; gap: 6px; align-items: center; }
+.hy-row .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line); display: inline-block; }
+.hy-row .dot.d { background: var(--dense); } .hy-row .dot.s { background: var(--sparse); }
+.hy-row.star { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.hy-row.dim { opacity: .5; }
+.hy-ctl { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); font-size: 0.85rem; }
+.hy-ctl[aria-disabled="true"] { opacity: .4; pointer-events: none; }
+.hy-ctl .mode { display: flex; gap: 12px; flex-wrap: wrap; }
+.hy-ctl label { display: inline-flex; gap: 6px; align-items: center; }
+.hy-ctl .alpha { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; }
+.hy-ctl .alpha .end { font-size: 0.72rem; font-weight: 600; }
+.hy-ctl .alpha .end.s { color: var(--sparse); } .hy-ctl .alpha .end.d { color: var(--dense); }
+.hy-ctl input[type=range] { width: 100%; accent-color: var(--accent); }
+.hy-ctl .formula { font-family: var(--mono); font-size: 0.78rem; color: var(--muted); }
+.legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 0.8rem; color: var(--muted); }
+.legend span { display: inline-flex; gap: 6px; align-items: center; }
+.legend i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+
+/* summary strip */
+.takeaways { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.take { padding: 14px 16px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); display: grid; gap: 6px; }
+.take h3 { font-size: 1rem; } .take p { font-size: 0.92rem; color: var(--muted); }
+.take.d h3 { color: var(--dense); } .take.s h3 { color: var(--sparse); } .take.h h3 { color: var(--accent); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 0.01ms !important; transition-delay: 0s !important; animation: none !important; }
+}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+<header class="top">
+  <h1><span class="d">Dense</span>, <span class="s">sparse</span>, hybrid</h1>
+  <p class="lede">How a search engine turns text into numbers, why two different kinds of numbers find two different kinds of things, and how a hybrid index uses both. Step through each stage with the buttons under it.</p>
+  <nav class="scenes" aria-label="Stages">
+    <a href="#embeddings">1 · Meaning as position</a>
+    <a href="#dense-sparse">2 · Dense vs sparse</a>
+    <a href="#hybrid">3 · Hybrid retrieval</a>
+  </nav>
+  <p class="kbd-hint"><kbd>←</kbd> <kbd>→</kbd> step the stage you are looking at.</p>
+</header>
+
+<!-- ===================== SCENE 1 ===================== -->
+<section class="scene" id="embeddings" data-scene="1">
+  <div>
+    <p class="eyebrow">Stage 1 of 3</p>
+    <h2>An embedding puts meaning on a map</h2>
+  </div>
+  <p class="intro">An embedding model reads a word, sentence or document and returns a list of numbers. Treat that list as coordinates and every piece of text becomes a point. Things that mean similar things land near each other.</p>
+
+  <div class="stage">
+    <figure>
+      <svg id="s1" class="step-1" viewBox="0 0 760 450" role="img" aria-label="Words plotted on a two-dimensional map. The offset from man to woman equals the offset from king to queen, so king minus man plus woman lands on queen. A query word is matched to its nearest neighbours.">
+        <defs>
+          <marker id="m-fg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="m-fg" d="M0 0 L10 5 L0 10 z"/></marker>
+          <marker id="m-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="m-accent" d="M0 0 L10 5 L0 10 z"/></marker>
+        </defs>
+        <g class="grid">
+          <line x1="50" y1="70" x2="710" y2="70"/><line x1="50" y1="125" x2="710" y2="125"/><line x1="50" y1="180" x2="710" y2="180"/>
+          <line x1="50" y1="290" x2="710" y2="290"/><line x1="50" y1="345" x2="710" y2="345"/><line x1="50" y1="400" x2="710" y2="400"/>
+          <line x1="105" y1="20" x2="105" y2="420"/><line x1="160" y1="20" x2="160" y2="420"/><line x1="215" y1="20" x2="215" y2="420"/><line x1="270" y1="20" x2="270" y2="420"/><line x1="325" y1="20" x2="325" y2="420"/>
+          <line x1="435" y1="20" x2="435" y2="420"/><line x1="490" y1="20" x2="490" y2="420"/><line x1="545" y1="20" x2="545" y2="420"/><line x1="600" y1="20" x2="600" y2="420"/><line x1="655" y1="20" x2="655" y2="420"/>
+        </g>
+        <g class="axes">
+          <line x1="50" y1="235" x2="710" y2="235"/>
+          <line x1="380" y1="20" x2="380" y2="420"/>
+        </g>
+        <text class="axis-label" x="380" y="442" text-anchor="middle">masculine  ◀  one learned direction  ▶  feminine</text>
+        <text class="axis-label" x="22" y="235" text-anchor="middle" transform="rotate(-90 22 235)">common  ◀  another learned direction  ▶  royal</text>
+
+        <!-- points -->
+        <g class="pts">
+          <g class="pt" data-w="boy"><circle cx="204" cy="411" r="5"/><text x="204" y="430" text-anchor="middle">boy</text></g>
+          <g class="pt" data-w="girl"><circle cx="556" cy="411" r="5"/><text x="556" y="430" text-anchor="middle">girl</text></g>
+          <g class="pt" data-w="man"><circle cx="237" cy="334" r="5"/><text x="237" y="354" text-anchor="middle">man</text></g>
+          <g class="pt" data-w="woman"><circle cx="523" cy="334" r="5"/><text x="523" y="354" text-anchor="middle">woman</text></g>
+          <g class="pt" data-w="prince"><circle cx="281" cy="180" r="5"/><text x="281" y="200" text-anchor="middle">prince</text></g>
+          <g class="pt" data-w="princess"><circle cx="567" cy="180" r="5"/><text x="567" y="200" text-anchor="middle">princess</text></g>
+          <g class="pt" data-w="king"><circle cx="259" cy="92" r="5"/><text x="259" y="80" text-anchor="middle">king</text></g>
+          <g class="pt" data-w="queen"><circle cx="545" cy="92" r="5"/><text x="545" y="80" text-anchor="middle">queen</text></g>
+        </g>
+
+        <!-- step 2: parallel offsets -->
+        <g class="st2">
+          <line class="draw off" pathLength="1" x1="248" y1="334" x2="510" y2="334" marker-end="url(#m-accent)"/>
+          <line class="draw off" pathLength="1" x1="270" y1="92" x2="532" y2="92" marker-end="url(#m-accent)"/>
+          <line class="draw off-faint" pathLength="1" x1="292" y1="180" x2="554" y2="180" marker-end="url(#m-accent)"/>
+          <text class="lab-accent" x="380" y="325" text-anchor="middle">woman − man</text>
+          <text class="lab-accent" x="400" y="82" text-anchor="middle">queen − king  (same arrow)</text>
+        </g>
+
+        <!-- step 3: arithmetic -->
+        <g class="st3">
+          <line id="v-king" class="draw" pathLength="1" x1="380" y1="235" x2="267" y2="101" stroke="currentColor" marker-end="url(#m-fg)"/>
+          <text class="lab-mono" x="324" y="162">king</text>
+          <line id="v-female" class="draw off" pathLength="1" x1="259" y1="92" x2="532" y2="92" marker-end="url(#m-accent)"/>
+          <text class="lab-accent lab-mono" x="396" y="110" text-anchor="middle">+ (woman − man)</text>
+          <circle id="queen-ring" cx="545" cy="92"/>
+          <text id="eq-label" class="lab-mono" x="590" y="56" text-anchor="middle">king − man + woman ≈ queen</text>
+        </g>
+
+        <!-- step 4: query and nearest neighbours -->
+        <g class="st4">
+          <line class="draw nn" pathLength="1" x1="380" y1="59" x2="259" y2="92"/>
+          <line class="draw nn" pathLength="1" x1="380" y1="59" x2="545" y2="92"/>
+          <line class="draw nn" pathLength="1" x1="380" y1="59" x2="281" y2="180"/>
+          <g class="q"><circle cx="380" cy="59" r="6"/><text x="380" y="44" text-anchor="middle">“monarch”  (the query)</text></g>
+          <g class="rank" transform="translate(576 236)">
+            <rect x="0" y="0" width="150" height="96" rx="6"/>
+            <text class="hd" x="12" y="22">nearest to “monarch”</text>
+            <text class="num" x="12" y="44">1</text><text x="30" y="44">king</text><text class="num" x="138" y="44" text-anchor="end">d 0.57</text>
+            <text class="num" x="12" y="64">2</text><text x="30" y="64">prince</text><text class="num" x="138" y="64" text-anchor="end">d 0.71</text>
+            <text class="num" x="12" y="84">3</text><text x="30" y="84">queen</text><text class="num" x="138" y="84" text-anchor="end">d 0.77</text>
+          </g>
+        </g>
+      </svg>
+      <figcaption class="srcap">Words as points on a plane; parallel offsets; vector arithmetic; nearest-neighbour search.</figcaption>
+    </figure>
+    <div class="stepper" data-stepper="1">
+      <button type="button" class="prev" id="s1-prev">◀ Prev</button>
+      <div class="cap"><div class="dots" aria-hidden="true"></div><div class="cap-title" aria-live="polite"></div><div class="cap-text"></div></div>
+      <button type="button" class="next" id="s1-next">Next ▶</button>
+    </div>
+  </div>
+
+  <details class="notes">
+    <summary>For engineers: what this cartoon leaves out</summary>
+    <div class="body">
+      <ul>
+        <li>Real embeddings have 384 to 3072 dimensions, not 2. The axes are not named; a model learns directions that happen to correlate with things like gender or formality, and most directions have no clean human label.</li>
+        <li>The king − man + woman ≈ queen result comes from word2vec (Mikolov et al., 2013) and holds only approximately. Modern retrieval models embed whole sentences or passages in context, so "queen" in a chess document and "queen" in a history document get different vectors.</li>
+        <li>Nearness is usually measured by cosine similarity, not straight-line distance. Vectors are normalised to unit length, so the dot product is the score.</li>
+        <li>Finding the nearest points among millions is done with an approximate nearest-neighbour index (HNSW, IVF, ScaNN). It trades a little recall for queries in milliseconds instead of seconds.</li>
+      </ul>
+      <div class="formula">cos(q, d) = (q · d) / (‖q‖ ‖d‖)      →  with unit vectors: score = Σᵢ qᵢ dᵢ</div>
+    </div>
+  </details>
+</section>
+
+<!-- ===================== SCENE 2 ===================== -->
+<section class="scene" id="dense-sparse" data-scene="2">
+  <div>
+    <p class="eyebrow">Stage 2 of 3</p>
+    <h2>Two ways to turn one document into numbers</h2>
+  </div>
+  <p class="intro">A <b style="color:var(--sparse)">sparse</b> vector has one slot per word in the vocabulary and is almost entirely zeros. A <b style="color:var(--dense)">dense</b> vector has a few hundred slots and every one of them is filled. They are built differently and they find different things.</p>
+
+  <div class="stage">
+    <figure>
+      <div class="figwrap">
+        <svg id="s2" class="step-1" viewBox="0 0 800 430" role="img" aria-label="One document encoded two ways: a sparse vector with a bar at each vocabulary slot its words occupy, and a dense vector of 64 shaded cells where every cell is non-zero."></svg>
+      </div>
+      <figcaption class="srcap">A sparse vector lights only the slots for words present; a dense vector fills every slot.</figcaption>
+    </figure>
+    <div class="qcards" id="qcards">
+      <div class="qcard">
+        <div class="q">power converter software bug</div>
+        <div class="row d"><b>dense</b><span><span class="mark hit">✓ 0.78</span> <span class="why">converter ≈ inverter, software ≈ firmware, bug ≈ fails</span></span></div>
+        <div class="row s"><b>sparse</b><span><span class="mark miss">✗ 0.00</span> <span class="why">no word in common, so no slot overlaps</span></span></div>
+      </div>
+      <div class="qcard">
+        <div class="q">SKU-4471</div>
+        <div class="row d"><b>dense</b><span><span class="mark miss">✗ 0.31</span> <span class="why">the model never learned what this code means</span></span></div>
+        <div class="row s"><b>sparse</b><span><span class="mark hit">✓ 4.1</span> <span class="why">exact slot match, and a rare term scores high</span></span></div>
+      </div>
+      <div class="qcard">
+        <div class="q">inverter warranty</div>
+        <div class="row d"><b>dense</b><span><span class="mark hit">✓ 0.66</span> <span class="why">same topic</span></span></div>
+        <div class="row s"><b>sparse</b><span><span class="mark hit">✓ 4.3</span> <span class="why">two slots overlap</span></span></div>
+      </div>
+    </div>
+    <div class="stepper" data-stepper="2">
+      <button type="button" class="prev" id="s2-prev">◀ Prev</button>
+      <div class="cap"><div class="dots" aria-hidden="true"></div><div class="cap-title" aria-live="polite"></div><div class="cap-text"></div></div>
+      <button type="button" class="next" id="s2-next">Next ▶</button>
+    </div>
+  </div>
+
+  <details class="notes">
+    <summary>For engineers: how each vector is produced and stored</summary>
+    <div class="body">
+      <p><b style="color:var(--sparse)">Sparse.</b> Dimension = vocabulary size (30k to 100k+). Classic weights come from BM25: term frequency, damped and length-normalised, times inverse document frequency, so rare terms count more. Learned sparse models (SPLADE, BGE-M3 sparse) keep the same shape but let a transformer pick the weights and add related terms the document never said. Stored as an inverted index: term → posting list of documents and weights. Exact, explainable, cheap.</p>
+      <div class="formula">BM25(q, d) = Σ_{t∈q} idf(t) · tf(t,d)·(k₁+1) / (tf(t,d) + k₁·(1 − b + b·|d|/avgdl))</div>
+      <p><b style="color:var(--dense)">Dense.</b> Dimension is fixed by the model (384, 768, 1024, 1536, 3072). A transformer encoder reads the passage, and the token outputs are pooled into one vector. No slot has a name; meaning is spread across all of them. Stored in a vector index (HNSW, IVF-PQ) and compared by cosine. Handles paraphrase, synonyms and cross-language queries, but is blind to tokens it never saw in training such as part numbers, new product names and internal jargon.</p>
+      <ul>
+        <li>Sparse wins on exact identifiers, codes, names, rare jargon, and anything newer than the model.</li>
+        <li>Dense wins on intent, paraphrase, misspellings, and queries phrased nothing like the document.</li>
+        <li>Neither is strictly better. That is the whole reason for stage 3.</li>
+      </ul>
+    </div>
+  </details>
+</section>
+
+<!-- ===================== SCENE 3 ===================== -->
+<section class="scene" id="hybrid" data-scene="3">
+  <div>
+    <p class="eyebrow">Stage 3 of 3</p>
+    <h2>A hybrid index asks both and merges the answers</h2>
+  </div>
+  <p class="intro">One query goes to two indexes. Each returns its own ranked list with its own kind of score. A fusion step turns the two lists into one. Documents that both indexes liked rise to the top, and documents only one index could find still make the list.</p>
+
+  <div class="stage">
+    <div class="hy" id="s3">
+      <div class="hy-query">
+        <div class="qt" id="hy-qt">inverter SKU-4471 keeps faulting after the firmware update</div>
+        <div class="enc">
+          <div class="tag"><svg id="mini-dense" width="96" height="14" viewBox="0 0 96 14" aria-hidden="true"></svg><span>dense · 768 floats</span></div>
+          <div class="tag"><svg id="mini-sparse" width="96" height="14" viewBox="0 0 96 14" aria-hidden="true"></svg><span>sparse · 6 of 30k slots</span></div>
+        </div>
+      </div>
+      <div class="hy-cols">
+        <div class="hy-col" data-col="dense">
+          <h3>Dense index <small>cosine</small></h3>
+          <div class="hy-list" id="list-dense"></div>
+        </div>
+        <div class="hy-col" data-col="sparse">
+          <h3>Sparse index <small>BM25</small></h3>
+          <div class="hy-list" id="list-sparse"></div>
+        </div>
+        <div class="hy-col" data-col="fused">
+          <h3>Fused <small id="fused-sub">one list</small></h3>
+          <div class="hy-list" id="list-fused"></div>
+          <div class="hy-ctl" id="hy-ctl" aria-disabled="true">
+            <div class="mode" role="radiogroup" aria-label="Fusion method">
+              <label><input type="radio" name="fmode" id="fmode-w" value="weighted" checked> weighted sum</label>
+              <label><input type="radio" name="fmode" id="fmode-rrf" value="rrf"> reciprocal rank fusion</label>
+            </div>
+            <div class="alpha" id="alpha-row">
+              <span class="end s">keyword</span>
+              <input type="range" id="alpha" min="0" max="1" step="0.05" value="0.5" aria-label="Weight toward dense">
+              <span class="end d">semantic</span>
+            </div>
+            <div class="formula" id="formula"></div>
+          </div>
+        </div>
+      </div>
+      <div class="legend"><span><i style="background:var(--dense)"></i> dense found it (cos ≥ 0.6)</span><span><i style="background:var(--sparse)"></i> sparse found it (BM25 ≥ 5)</span><span><i style="background:var(--accent)"></i> top of the fused list</span></div>
+    </div>
+    <div class="stepper" data-stepper="3">
+      <button type="button" class="prev" id="s3-prev">◀ Prev</button>
+      <div class="cap"><div class="dots" aria-hidden="true"></div><div class="cap-title" aria-live="polite"></div><div class="cap-text"></div></div>
+      <button type="button" class="next" id="s3-next">Next ▶</button>
+    </div>
+  </div>
+
+  <details class="notes">
+    <summary>For engineers: fusion, scoring and where this runs</summary>
+    <div class="body">
+      <p>The two retrievers return scores on unrelated scales (cosine in [−1, 1], BM25 unbounded), so you cannot add them raw. Two standard fixes:</p>
+      <div class="formula">weighted:  score = α · norm(cos) + (1 − α) · norm(bm25)      norm = min–max over the returned list</div>
+      <div class="formula">RRF:       score = Σ_lists 1 / (k + rank_in_list)      k = 60 by convention</div>
+      <ul>
+        <li>RRF ignores score magnitudes entirely, which makes it robust and tuning-free. Weighted fusion lets you bias toward one side, which is useful when you know your traffic is ID-heavy or question-heavy.</li>
+        <li>Most engines run both indexes in one place: Elasticsearch and OpenSearch (BM25 + kNN), Qdrant, Weaviate, Vespa, Postgres with <code>tsvector</code> + <code>pgvector</code>. Some return a fused list natively; otherwise fuse in application code.</li>
+        <li>Fetch more than you need from each side (say top 50 each) before fusing, or a document strong in one index and absent from the other's top-k never gets a chance.</li>
+        <li>A common third stage is a cross-encoder reranker over the fused top 20 to 100. It reads query and document together and is far more accurate, but too slow to run over the whole corpus.</li>
+      </ul>
+    </div>
+  </details>
+</section>
+
+<section class="scene" id="summary">
+  <div>
+    <p class="eyebrow">The short version</p>
+    <h2>Three sentences to take away</h2>
+  </div>
+  <div class="takeaways">
+    <div class="take d"><h3>Dense</h3><p>Meaning as a position. Finds things that are about the same thing, even in different words.</p></div>
+    <div class="take s"><h3>Sparse</h3><p>Words as switches. Finds things that contain the exact term, including codes the model has never seen.</p></div>
+    <div class="take h"><h3>Hybrid</h3><p>Ask both, merge the lists. Documents both agree on rise; documents only one could find still appear.</p></div>
+  </div>
+</section>
+</div>
+
+<script>
+(function () {
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---------- generic stepper ---------- */
+  function makeStepper(num, target, steps) {
+    const bar = document.querySelector(`[data-stepper="${num}"]`);
+    const prev = bar.querySelector('.prev'), next = bar.querySelector('.next');
+    const dots = bar.querySelector('.dots'), title = bar.querySelector('.cap-title'), text = bar.querySelector('.cap-text');
+    steps.forEach(() => { const i = document.createElement('i'); dots.appendChild(i); });
+    let cur = 0;
+    function go(i) {
+      cur = Math.max(0, Math.min(steps.length - 1, i));
+      for (let k = 1; k <= steps.length; k++) target.classList.remove('step-' + k);
+      target.classList.add('step-' + (cur + 1));
+      [...dots.children].forEach((d, k) => d.classList.toggle('on', k <= cur));
+      title.textContent = `${cur + 1}. ${steps[cur].title}`;
+      text.textContent = steps[cur].text;
+      prev.disabled = cur === 0; next.disabled = cur === steps.length - 1;
+      if (steps[cur].enter) steps[cur].enter();
+    }
+    prev.addEventListener('click', () => go(cur - 1));
+    next.addEventListener('click', () => go(cur + 1));
+    go(0);
+    return { go, next: () => go(cur + 1), prev: () => go(cur - 1), el: bar.closest('.scene') };
+  }
+
+  /* ---------- scene 1 ---------- */
+  const s1 = document.getElementById('s1');
+  makeStepper(1, s1, [
+    { title: 'Every word becomes a point',
+      text: 'The model turns each word into coordinates. Similar meanings land close together: the royals sit high, the children sit low, and the two sides of the map differ by gender.' },
+    { title: 'Directions carry meaning',
+      text: 'The arrow from man to woman is the same arrow as from king to queen. That shared direction is what the model has learned "female" to mean.' },
+    { title: 'So you can do arithmetic on meaning',
+      text: 'Start at king, add the female direction, and you land on queen. In short: king − man + woman ≈ queen.',
+      enter() { if (reduce) return; /* restart the draw so the sequence replays on revisit */
+        const g = s1.querySelector('.st3'); g.style.display = 'none'; void g.offsetWidth; g.style.display = ''; } },
+    { title: 'Search is just "find the nearest points"',
+      text: 'Embed the query the same way and ask which stored points are closest. The ranked list is the search result. This is semantic search: it matches meaning, not spelling.',
+      enter() { s1.querySelectorAll('.pt').forEach(p => p.classList.toggle('dim', !['king','queen','prince'].includes(p.dataset.w))); } },
+  ]);
+  s1.querySelectorAll('.pt').forEach(p => p.classList.remove('dim'));
+  // undim points whenever we leave step 4
+  new MutationObserver(() => { if (!s1.classList.contains('step-4')) s1.querySelectorAll('.pt').forEach(p => p.classList.remove('dim')); })
+    .observe(s1, { attributes: true, attributeFilter: ['class'] });
+
+  /* ---------- scene 2 ---------- */
+  const NS = 'http://www.w3.org/2000/svg';
+  function el(name, attrs, parent) {
+    const e = document.createElementNS(NS, name);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function txt(parent, x, y, s, attrs) { const t = el('text', Object.assign({ x, y }, attrs || {}), parent); t.textContent = s; return t; }
+  const s2 = document.getElementById('s2');
+  (function buildS2() {
+    // document tokens
+    const tokens = [
+      { t: 'Inverter', slot: 23, w: 2.4 }, { t: 'SKU-4471', slot: 61, w: 4.1 }, { t: 'firmware', slot: 83, w: 2.1 },
+      { t: '2.3.1', slot: 97, w: 3.3 }, { t: 'fails', slot: 112, w: 1.2 }, { t: 'the', stop: true },
+      { t: 'warranty', slot: 139, w: 1.9 }, { t: 'check', slot: 151, w: 0.8 },
+    ];
+    txt(s2, 80, 30, 'one document', { class: 'sub' });
+    let x = 80;
+    const tokGroups = [];
+    tokens.forEach(tk => {
+      const w = tk.t.length * 7.6 + 18;
+      const g = el('g', { class: 'tok' + (tk.stop ? ' stop' : ' hit'), transform: `translate(${x} 40)` }, s2);
+      el('rect', { x: 0, y: 0, width: w, height: 28, rx: 5 }, g);
+      txt(g, w / 2, 19, tk.t, { 'text-anchor': 'middle' });
+      tokGroups.push({ g, x, w, tk });
+      x += w + 8;
+    });
+
+    // ---- sparse block
+    const sb = el('g', { class: 'sblock' }, s2);
+    txt(sb, 80, 118, 'sparse vector', { class: 'lbl s' });
+    txt(sb, 185, 118, '30,522 slots, one per vocabulary term · showing 160 · 7 are non-zero', { class: 'sub' });
+    const slotW = 4, slotX = 80, baseY = 235, slotN = 160;
+    for (let i = 0; i < slotN; i++) el('rect', { class: 'sslot', x: slotX + i * slotW, y: baseY, width: slotW, height: 8 }, sb);
+    txt(sb, slotX, 258, 'slot 0', { class: 'sub', 'font-size': 10 });
+    txt(sb, slotX + slotN * slotW, 258, '…slot 30,521', { class: 'sub', 'font-size': 10, 'text-anchor': 'end' });
+    txt(sb, 80, 282, 'every other slot is exactly 0 → stored as an inverted index, term → documents', { class: 'sub' });
+    tokens.filter(t => !t.stop).forEach((tk, i) => {
+      const bx = slotX + tk.slot * slotW, h = tk.w / 4.1 * 72;
+      el('rect', { class: 'sbar', x: bx, y: baseY - h, width: slotW, height: h, style: `transition-delay:${i * 90}ms` }, sb);
+      const lg = el('g', { class: 'slab' }, sb);
+      txt(lg, bx + 2, baseY - h - 18, tk.t.toLowerCase(), { 'text-anchor': 'middle' });
+      txt(lg, bx + 2, baseY - h - 6, tk.w.toFixed(1), { class: 'w', 'text-anchor': 'middle' });
+    });
+    // flow line from tokens to sparse
+    el('path', { class: 'flow s', d: 'M 30 54 C 20 54 20 150 30 150 L 60 150', 'marker-end': 'url(#m2)' }, s2);
+    txt(s2, 36, 143, 'count the words', { class: 'arrow-lbl flow-lbl s' });
+
+    // ---- dense block
+    const db = el('g', { class: 'dblock' }, s2);
+    txt(db, 80, 322, 'dense vector', { class: 'lbl d' });
+    txt(db, 180, 322, '768 floats from the model · showing 64 · all 768 are non-zero', { class: 'sub' });
+    const cellW = 10, cellX = 80, cellY = 334, N = 64;
+    const vals = [];
+    for (let i = 0; i < N; i++) {
+      const f = Math.sin(i * 12.9898 + 7.233) * 43758.5453; const v = (f - Math.floor(f)) * 2 - 1;
+      vals.push(v);
+      el('rect', { class: 'dcell ghost', x: cellX + i * cellW, y: cellY, width: cellW, height: 26 }, db);
+      el('rect', { class: 'dcell', x: cellX + i * cellW, y: cellY, width: cellW, height: 26, style: `--a:${(0.2 + Math.abs(v) * 0.8).toFixed(2)};transition-delay:${i * 12}ms` }, db);
+    }
+    const dv = el('g', { class: 'dvals' }, db);
+    for (let i = 0; i < N; i += 8) txt(dv, cellX + i * cellW + cellW / 2, 377, (vals[i] >= 0 ? '+' : '') + vals[i].toFixed(2), { class: 'd-val', 'text-anchor': 'middle' });
+    txt(dv, cellX + N * cellW, 377, '…', { class: 'd-val', 'text-anchor': 'end' });
+    txt(db, 80, 404, 'no slot means "inverter"; the meaning is spread across all 768 → stored in a vector index, compared by angle', { class: 'sub' });
+    el('path', { class: 'flow d', d: 'M 30 54 C 12 54 12 345 30 345 L 60 345', 'marker-end': 'url(#m2)' }, s2);
+    txt(s2, 36, 338, 'run the model', { class: 'arrow-lbl flow-lbl d' });
+    const defs = el('defs', {}, s2);
+    const m = el('marker', { id: 'm2', viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto' }, defs);
+    el('path', { class: 'm-muted', d: 'M0 0 L10 5 L0 10 z' }, m);
+  })();
+  const qcards = document.getElementById('qcards');
+  makeStepper(2, s2, [
+    { title: 'Start with one document',
+      text: 'A support ticket: "Inverter SKU-4471 firmware 2.3.1 fails the warranty check." Both encodings start from these same eight words.',
+      enter() { qcards.classList.remove('show'); } },
+    { title: 'Sparse: count the words',
+      text: 'Each word has its own slot in a vocabulary of thirty thousand. Put a weight in the slot for every word present (rare words weigh more), leave everything else at zero. "the" is dropped as a stop word.',
+      enter() { qcards.classList.remove('show'); } },
+    { title: 'Dense: run the model',
+      text: 'An embedding model reads the whole sentence and emits 768 numbers. Every one is filled. No single number stands for "inverter"; the meaning is smeared across all of them.',
+      enter() { qcards.classList.remove('show'); } },
+    { title: 'What each one can find',
+      text: 'Three queries against that one document. Dense matches the paraphrase and misses the part number. Sparse matches the part number and misses the paraphrase. Only the third query is found by both.',
+      enter() { qcards.classList.add('show'); } },
+  ]);
+
+  /* ---------- scene 3 ---------- */
+  const docs = [
+    { id: 'D1', t: 'SKU-4471 inverter: fault code E07 after firmware 2.3.1 upgrade', cos: 0.82, bm: 14.2 },
+    { id: 'D2', t: 'Troubleshooting power converters that trip after software updates', cos: 0.79, bm: 2.1 },
+    { id: 'D3', t: 'SKU-4471 datasheet: electrical ratings and mounting', cos: 0.41, bm: 11.8 },
+    { id: 'D4', t: 'Warranty claims for solar inverters, 2025 policy', cos: 0.58, bm: 3.9 },
+    { id: 'D5', t: 'Quarterly fleet report: inverter uptime by site', cos: 0.52, bm: 4.6 },
+    { id: 'D6', t: 'Office kitchen cleaning rota', cos: 0.05, bm: 0.0 },
+    { id: 'D7', t: 'Firmware 2.3.1 release notes: known issues with grid reconnection', cos: 0.71, bm: 6.0 },
+  ];
+  const ROW = 46;
+  const byCos = [...docs].sort((a, b) => b.cos - a.cos), byBm = [...docs].sort((a, b) => b.bm - a.bm);
+  const rankCos = {}, rankBm = {};
+  byCos.forEach((d, i) => rankCos[d.id] = i + 1); byBm.forEach((d, i) => rankBm[d.id] = i + 1);
+  const minmax = (arr, key) => { const v = arr.map(d => d[key]); const lo = Math.min(...v), hi = Math.max(...v); return d => (d[key] - lo) / (hi - lo || 1); };
+  const nCos = minmax(docs, 'cos'), nBm = minmax(docs, 'bm');
+
+  function buildList(container, ordered, scoreOf) {
+    container.innerHTML = '';
+    const rows = {};
+    ordered.forEach((d, i) => {
+      const r = document.createElement('div'); r.className = 'hy-row'; r.dataset.id = d.id;
+      r.style.setProperty('--y', (i * ROW) + 'px');
+      r.innerHTML = `<span class="rk">${i + 1}</span><span class="tt" title="${d.t}">${d.t}</span><span class="sc"><i class="dot ${d.cos >= 0.6 ? 'd' : ''}"></i><i class="dot ${d.bm >= 5 ? 's' : ''}"></i><span class="v">${scoreOf(d)}</span></span>`;
+      container.appendChild(r); rows[d.id] = r;
+    });
+    return rows;
+  }
+  buildList(document.getElementById('list-dense'), byCos, d => d.cos.toFixed(2));
+  buildList(document.getElementById('list-sparse'), byBm, d => d.bm.toFixed(1));
+  const fusedRows = buildList(document.getElementById('list-fused'), docs, () => '');
+
+  const alpha = document.getElementById('alpha'), formula = document.getElementById('formula'), fusedSub = document.getElementById('fused-sub');
+  const modeW = document.getElementById('fmode-w'), modeR = document.getElementById('fmode-rrf'), alphaRow = document.getElementById('alpha-row');
+  function fuse() {
+    const rrf = modeR.checked, a = parseFloat(alpha.value), K = 60;
+    const scored = docs.map(d => ({ d, s: rrf ? 1 / (K + rankCos[d.id]) + 1 / (K + rankBm[d.id]) : a * nCos(d) + (1 - a) * nBm(d) }));
+    scored.sort((x, y) => y.s - x.s);
+    scored.forEach((x, i) => {
+      const r = fusedRows[x.d.id];
+      r.style.setProperty('--y', (i * ROW) + 'px');
+      r.querySelector('.rk').textContent = i + 1;
+      r.querySelector('.v').textContent = rrf ? x.s.toFixed(4) : x.s.toFixed(2);
+      r.classList.toggle('star', i === 0);
+    });
+    alphaRow.style.opacity = rrf ? .4 : 1; alpha.disabled = rrf;
+    formula.textContent = rrf ? 'score = 1/(60 + rank_dense) + 1/(60 + rank_sparse)' : `score = ${a.toFixed(2)} · norm(cos) + ${(1 - a).toFixed(2)} · norm(bm25)`;
+    fusedSub.textContent = rrf ? 'RRF, k = 60' : `α = ${a.toFixed(2)}`;
+  }
+  alpha.addEventListener('input', fuse); modeW.addEventListener('change', fuse); modeR.addEventListener('change', fuse);
+  fuse();
+
+  const miniDense = document.getElementById('mini-dense'), miniSparse = document.getElementById('mini-sparse');
+  for (let i = 0; i < 24; i++) { const f = Math.sin(i * 9.1 + 3) * 1000; const v = f - Math.floor(f); el('rect', { x: i * 4, y: 0, width: 4, height: 14, fill: 'var(--dense)', opacity: (0.2 + v * 0.8).toFixed(2) }, miniDense); }
+  el('rect', { x: 0, y: 11, width: 96, height: 3, fill: 'var(--line)' }, miniSparse);
+  [7, 29, 48, 70, 88].forEach((x, i) => el('rect', { x, y: 14 - [11, 14, 8, 13, 6][i], width: 3, height: [11, 14, 8, 13, 6][i], fill: 'var(--sparse)' }, miniSparse));
+
+  const cols = { dense: document.querySelector('[data-col="dense"]'), sparse: document.querySelector('[data-col="sparse"]'), fused: document.querySelector('[data-col="fused"]') };
+  const ctl = document.getElementById('hy-ctl');
+  const s3 = document.getElementById('s3');
+  makeStepper(3, s3, [
+    { title: 'One query, encoded twice',
+      text: 'The same text is run through the embedding model (768 floats) and through the tokenizer (five vocabulary slots). Two representations of one question.',
+      enter() { Object.values(cols).forEach(c => c.classList.remove('on')); ctl.setAttribute('aria-disabled', 'true'); } },
+    { title: 'Each index returns its own ranked list',
+      text: 'Dense ranks by cosine and loves the paraphrase about power converters. Sparse ranks by BM25 and loves anything containing SKU-4471, including the datasheet. The scores are on different scales and cannot be added as they are.',
+      enter() { cols.dense.classList.add('on'); cols.sparse.classList.add('on'); cols.fused.classList.remove('on'); ctl.setAttribute('aria-disabled', 'true'); } },
+    { title: 'Fuse the two lists into one',
+      text: 'Normalise each list\'s scores and add them, or ignore scores and add reciprocal ranks. The ticket that both indexes liked lands at the top. Drag the slider to lean keyword or semantic, or switch to RRF.',
+      enter() { cols.dense.classList.add('on'); cols.sparse.classList.add('on'); cols.fused.classList.add('on'); ctl.setAttribute('aria-disabled', 'false'); fuse(); } },
+  ]);
+
+  /* ---------- keyboard: arrows step the scene in view ---------- */
+  const reg = {};
+  document.querySelectorAll('.scene[data-scene]').forEach(s => reg[s.dataset.scene] = s);
+  let active = '1';
+  const io = new IntersectionObserver(entries => {
+    let best = null;
+    entries.forEach(e => { if (e.isIntersecting && (!best || e.intersectionRatio > best.intersectionRatio)) best = e; });
+    if (best) active = best.target.dataset.scene;
+  }, { threshold: [0.25, 0.5, 0.75] });
+  Object.values(reg).forEach(s => io.observe(s));
+  document.addEventListener('keydown', e => {
+    if (e.target.matches('input, textarea, select')) return;
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+    const bar = reg[active] && reg[active].querySelector('[data-stepper]');
+    if (!bar) return;
+    e.preventDefault();
+    bar.querySelector(e.key === 'ArrowRight' ? '.next' : '.prev').click();
+  });
+})();
+</script>
+
+</body>
+</html>
